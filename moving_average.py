@@ -16,10 +16,20 @@ import numpy as np
 import sys
 
 #--------------------------------------- VARIABLES ------------------------------------------------#
-start               = to_gps(sys.argv[1])     
-end                 = to_gps(sys.argv[2])       
+if sys.argv[1].isdigit():            # now takes both gps and dates
+    start           = sys.argv[1]
+else:
+    start           = to_gps(sys.argv[1])
+if sys.argv[2].isdigit():
+    end             = sys.argv[2]
+else:
+    end             = to_gps(sys.argv[2])
 file_location1      = sys.argv[3]
 file_location2      = sys.argv[4]
+if len(sys.argv) != 5:
+    detector        = sys.argv[5]    # added detector arg to get H1 data
+else:
+    detector        = 'L1'
 
 STRIDE = 60
 AVERAGE_LEN = 30
@@ -34,8 +44,8 @@ mean_list8 = []
 mean_list10 = []
 mean_list20 = []
 
-channel             = 'L1:GDS-CALIB_STRAIN'
-analysis_ready_flag = 'L1:DMT-ANALYSIS_READY:1'
+channel             = f'{detector}:GDS-CALIB_STRAIN'  # added detector
+analysis_ready_flag = f'{detector}:DMT-ANALYSIS_READY:1'
 #--------------------------------------------------------------------------------------------------#
 
 #--------------------------------------- FUNCTIONS ------------------------------------------------#
