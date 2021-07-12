@@ -1,7 +1,7 @@
 # Running the moving_average script (version 1.0)
 
-Once a new bash shell has been opened, log into the LLO cluster and create the conda environment.
-The following are the required arguments, in order:
+Once a new bash shell has been opened, log into the LLO cluster and create the conda environment.&nbsp;
+The following are the required arguments, in order:&nbsp;
     start time (in GPS or UTC)
     end time (in GPS or UTC)
     plot 1 save location (it is recommended that the name of the .jpg file is specified, as well)
