@@ -14,6 +14,7 @@ from gwpy.time import to_gps
 
 import numpy as np
 import sys
+import os
 
 #--------------------------------------- VARIABLES ------------------------------------------------#
 if sys.argv[1].isdigit():            # now takes both gps and dates
@@ -24,28 +25,27 @@ if sys.argv[2].isdigit():
     end             = sys.argv[2]
 else:
     end             = to_gps(sys.argv[2])
-file_location1      = sys.argv[3]
-file_location2      = sys.argv[4]
-if len(sys.argv) != 5:
-    detector        = sys.argv[5]    # added detector arg to get H1 data
+folder_location     = sys.argv[3]    # folder for dumping timeseries
+if len(sys.argv) != 4:
+    detector        = sys.argv[4]    # added detector arg to get H1 data
 else:
     detector        = 'L1'
 
 STRIDE = 60
 AVERAGE_LEN = 30
 
-omicron_MA_5 = TimeSeries([],dt=STRIDE, t0=start)
-omicron_MA_8 = TimeSeries([],dt=STRIDE, t0=start)
-omicron_MA_10 = TimeSeries([],dt=STRIDE, t0=start)
-omicron_MA_20 = TimeSeries([],dt=STRIDE, t0=start)
+channel             = f'{detector}:GDS-CALIB_STRAIN'  # added detector
+analysis_ready_flag = f'{detector}:DMT-ANALYSIS_READY:1'
+
+omicron_MA_5 = TimeSeries([],dt=STRIDE, t0=start, channel=channel, name='MA_5')
+omicron_MA_8 = TimeSeries([],dt=STRIDE, t0=start, channel=channel, name='MA_8')
+omicron_MA_10 = TimeSeries([],dt=STRIDE, t0=start, channel=channel, name='MA_10')
+omicron_MA_20 = TimeSeries([],dt=STRIDE, t0=start, channel=channel, name='MA_20')
 
 mean_list5 = []
 mean_list8 = []
 mean_list10 = []
 mean_list20 = []
-
-channel             = f'{detector}:GDS-CALIB_STRAIN'  # added detector
-analysis_ready_flag = f'{detector}:DMT-ANALYSIS_READY:1'
 #--------------------------------------------------------------------------------------------------#
 
 #--------------------------------------- FUNCTIONS ------------------------------------------------#
@@ -134,7 +134,16 @@ for segment in new_seg_list:
     for i in moving_avg_20.value:
         mean_list20.append(i)
     omicron_MA_20.append(moving_avg_20, pad=0)
+    
+omicron_ts_list = [omicron_MA_5, omicron_MA_8, omicron_MA_10, omicron_MA_20]  # list of omicron ts for saving
 
+ts_cushion = STRIDE*AVERAGE_LEN/2   # time cushion for cropping timeseries
+
+for ma in omicron_ts_list:
+    out_path = os.path.join(folder_location, f'{ma.name}.gwf')
+    ma.crop(int(start)+ts_cushion, int(end)-ts_cushion).write(out_path, format='gwf')
+
+# regular moving-avg stuff
 std5 = np.std(mean_list5)
 std8 = np.std(mean_list8)
 std10 = np.std(mean_list10)
@@ -143,6 +152,7 @@ mean5 = np.mean(mean_list5)
 mean8 = np.mean(mean_list8)
 mean10 = np.mean(mean_list10)
 mean20 = np.mean(mean_list20)
+
 
 plot1 = Plot(omicron_MA_5, omicron_MA_8,omicron_MA_10, omicron_MA_20, figsize=(20, 7))
 ax1 = plot1.gca()
@@ -163,5 +173,5 @@ ax2.axhline(mean20+std20, color='cyan', linestyle='--', label = 'Mean20+STD')
 ax2.set_xlim(start,end)
 ax2.legend()
 
-plot1.save(file_location1)
-plot2.save(file_location2)
+plot1.save(os.path.join(folder_location, 'plot_1.jpg'))
+plot2.save(os.path.join(folder_location, 'plot_2.jpg'))
