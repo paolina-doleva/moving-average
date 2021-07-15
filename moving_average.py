@@ -18,13 +18,13 @@ import os
 
 #--------------------------------------- VARIABLES ------------------------------------------------#
 if sys.argv[1].isdigit():            # now takes both gps and dates
-    start           = sys.argv[1]
+    actual_start           = int(sys.argv[1])
 else:
-    start           = to_gps(sys.argv[1])
+    actual_start           = int(to_gps(sys.argv[1]))
 if sys.argv[2].isdigit():
-    end             = sys.argv[2]
+    actual_end             = int(sys.argv[2])
 else:
-    end             = to_gps(sys.argv[2])
+    actual_end             = int(to_gps(sys.argv[2]))
 folder_location     = sys.argv[3]    # folder for dumping timeseries
 if len(sys.argv) != 4:
     detector        = sys.argv[4]    # added detector arg to get H1 data
@@ -32,15 +32,17 @@ else:
     detector        = 'L1'
 
 STRIDE = 60
-AVERAGE_LEN = 30
+AVERAGE_LEN = 25
+ts_cushion = STRIDE * AVERAGE_LEN / 2
+start, end = actual_start-ts_cushion, actual_end+ts_cushion   # start earlier and end later to account for averaging
 
 channel             = f'{detector}:GDS-CALIB_STRAIN'  # added detector
 analysis_ready_flag = f'{detector}:DMT-ANALYSIS_READY:1'
 
-omicron_MA_5 = TimeSeries([],dt=STRIDE, t0=start, channel=channel, name='MA_5')
-omicron_MA_8 = TimeSeries([],dt=STRIDE, t0=start, channel=channel, name='MA_8')
-omicron_MA_10 = TimeSeries([],dt=STRIDE, t0=start, channel=channel, name='MA_10')
-omicron_MA_20 = TimeSeries([],dt=STRIDE, t0=start, channel=channel, name='MA_20')
+omicron_MA_5 = TimeSeries([],dt=STRIDE, t0=actual_start, channel=channel, name='MA_5')
+omicron_MA_8 = TimeSeries([],dt=STRIDE, t0=actual_start, channel=channel, name='MA_8')
+omicron_MA_10 = TimeSeries([],dt=STRIDE, t0=actual_start, channel=channel, name='MA_10')
+omicron_MA_20 = TimeSeries([],dt=STRIDE, t0=actual_start, channel=channel, name='MA_20')
 
 mean_list5 = []
 mean_list8 = []
@@ -63,19 +65,23 @@ def moving_average(events, stride, avg_len, user_start, user_end):
     omicron_rate = events.event_rate(stride, start=user_start, end=user_end)    
     omicron_rate_vals    = omicron_rate.value                         
     average_length       = avg_len
-
-    i = 0
+    
+    real_start, real_end = user_start+(stride*avg_len/2), user_end-(stride*avg_len/2)
+    
     moving_averages       = []                                          
-    moving_averages_times = []                                          
-     
-    while i < len(omicron_rate_vals) - average_length:
+    moving_averages_times = np.arange(real_start, real_end+stride, step=stride)
+    print(len(moving_averages_times))
+    print(len(omicron_rate_vals)-average_length+1)
+    
+    for i in range(len(omicron_rate_vals)-average_length+1): 
         total_points = omicron_rate_vals[i: i + average_length]         
         sma = sum(total_points)/average_length                          
         moving_averages.append(sma)
-        moving_averages_times.append(omicron_rate.times.value[i+int(average_length/2)]) 
-        i += 1                                                                          
+        time = omicron_rate.times.value[i+int(average_length/2)]                                                                 
 
-    omicron_MA = TimeSeries(moving_averages, times=moving_averages_times)   
+    omicron_MA = TimeSeries(moving_averages, times=moving_averages_times)
+    print(len(omicron_MA.times))
+    print(len(omicron_MA.value))
     return omicron_MA
 
 """
@@ -137,11 +143,12 @@ for segment in new_seg_list:
     
 omicron_ts_list = [omicron_MA_5, omicron_MA_8, omicron_MA_10, omicron_MA_20]  # list of omicron ts for saving
 
-ts_cushion = STRIDE*AVERAGE_LEN/2   # time cushion for cropping timeseries
-
 for ma in omicron_ts_list:
     out_path = os.path.join(folder_location, f'{ma.name}.gwf')
-    ma.crop(int(start)+ts_cushion, int(end)-ts_cushion).write(out_path, format='gwf')
+    print('start: ', ma.times[0])
+    print('Expected end: ', actual_end)
+    print('Actual end: ', ma.times[-1])
+    ma.write(out_path, format='gwf')
 
 # regular moving-avg stuff
 std5 = np.std(mean_list5)
