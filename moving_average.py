@@ -15,24 +15,19 @@ from gwpy.time import to_gps
 import numpy as np
 import sys
 import os
+import parser
 
 #--------------------------------------- VARIABLES ------------------------------------------------#
-if sys.argv[1].isdigit():            # now takes both gps and dates
-    actual_start           = int(sys.argv[1])
-else:
-    actual_start           = int(to_gps(sys.argv[1]))
-if sys.argv[2].isdigit():
-    actual_end             = int(sys.argv[2])
-else:
-    actual_end             = int(to_gps(sys.argv[2]))
-folder_location     = sys.argv[3]    # folder for dumping timeseries
-if len(sys.argv) != 4:
-    detector        = sys.argv[4]    # added detector arg to get H1 data
-else:
-    detector        = 'L1'
+# make parser and get args
+parser = parser.create_parser()
+args = parser.parse_args()
 
-STRIDE = 60
-AVERAGE_LEN = 25
+actual_start = int(args.gpsstart)
+actual_end = int(args.gpsend)
+folder_location = args.output_dir
+detector = args.detector
+STRIDE = args.stride # 60s default
+AVERAGE_LEN = args.averaging_length # 30 default
 ts_cushion = STRIDE * AVERAGE_LEN / 2
 start, end = actual_start-ts_cushion, actual_end+ts_cushion   # start earlier and end later to account for averaging
 
@@ -143,6 +138,10 @@ for segment in new_seg_list:
     
 omicron_ts_list = [omicron_MA_5, omicron_MA_8, omicron_MA_10, omicron_MA_20]  # list of omicron ts for saving
 
+# check if output folder exists
+if not os.path.exists(folder_location):
+    os.makedirs(folder_location)
+    
 for ma in omicron_ts_list:
     out_path = os.path.join(folder_location, f'{ma.name}.gwf')
     print('start: ', ma.times[0])
