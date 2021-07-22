@@ -2,6 +2,17 @@ import argparse
 import os
 from gwpy.time import to_gps
 
+def snr_list(arg):
+    if arg is list:
+        return arg
+    else:
+        try:
+            snr_list = list(map(int, arg.strip('[]').split(',')))
+            return snr_list
+        except Exception:
+            raise ValueError('Please enter a list of snr values')
+        
+
 def create_parser():
     """Create a command-line parser for this entry point
     """
@@ -41,6 +52,13 @@ def create_parser():
         default = 60,
         type=int,
         help='stride between points in seconds',
+    )
+    parser.add_argument(
+        '-snr',
+        '--snr_list',
+        default = [5, 8, 10, 20],
+        type=snr_list,
+        help='list of snr\'s to average separated by commas'
     )
     
 
