@@ -13,29 +13,37 @@ from gwpy.plot import Plot
 from gwpy.time import to_gps
 
 import numpy as np
+from matplotlib import cm
 import sys
+import os
+import parser
 
 #--------------------------------------- VARIABLES ------------------------------------------------#
-start               = to_gps(sys.argv[1])     
-end                 = to_gps(sys.argv[2])       
-file_location1      = sys.argv[3]
-file_location2      = sys.argv[4]
+# make parser and get args
+parser = parser.create_parser()
+args = parser.parse_args()
 
-STRIDE = 60
-AVERAGE_LEN = 30
+actual_start = int(args.gpsstart)
+actual_end = int(args.gpsend)
+folder_location = args.output_dir
+detector = args.detector
+STRIDE = args.stride # 60s default
+AVERAGE_LEN = args.averaging_length # 30 default
+snr_list = args.snr_list # [5, 8, 10, 20] default
 
-omicron_MA_5 = TimeSeries([],dt=STRIDE, t0=start)
-omicron_MA_8 = TimeSeries([],dt=STRIDE, t0=start)
-omicron_MA_10 = TimeSeries([],dt=STRIDE, t0=start)
-omicron_MA_20 = TimeSeries([],dt=STRIDE, t0=start)
+out_folder = os.path.join(folder_location, f'm{AVERAGE_LEN*STRIDE//60}avg')
+ts_cushion = STRIDE * AVERAGE_LEN / 2
+start, end = actual_start-ts_cushion, actual_end+ts_cushion   # start earlier and end later to account for averaging
 
-mean_list5 = []
-mean_list8 = []
-mean_list10 = []
-mean_list20 = []
+channel             = f'{detector}:GDS-CALIB_STRAIN'  # added detector
+analysis_ready_flag = f'{detector}:DMT-ANALYSIS_READY:1'
 
-channel             = 'L1:GDS-CALIB_STRAIN'
-analysis_ready_flag = 'L1:DMT-ANALYSIS_READY:1'
+omicron_MA_dict = {}
+for snr in snr_list:
+    omicron_MA_dict[snr] = {}
+    omicron_MA_dict[snr]['ts'] = TimeSeries([], dt=STRIDE, t0=actual_start, channel=channel, name=f'MA_{snr}')
+    omicron_MA_dict[snr]['mean_list'] = []
+
 #--------------------------------------------------------------------------------------------------#
 
 #--------------------------------------- FUNCTIONS ------------------------------------------------#
@@ -53,19 +61,17 @@ def moving_average(events, stride, avg_len, user_start, user_end):
     omicron_rate = events.event_rate(stride, start=user_start, end=user_end)    
     omicron_rate_vals    = omicron_rate.value                         
     average_length       = avg_len
-
-    i = 0
+    real_start, real_end = user_start+(stride*avg_len/2), user_end-(stride*avg_len/2)
     moving_averages       = []                                          
-    moving_averages_times = []                                          
-     
-    while i < len(omicron_rate_vals) - average_length:
+    moving_averages_times = np.arange(real_start, real_end+stride, step=stride)
+    
+    for i in range(len(omicron_rate_vals)-average_length+1): 
         total_points = omicron_rate_vals[i: i + average_length]         
         sma = sum(total_points)/average_length                          
         moving_averages.append(sma)
-        moving_averages_times.append(omicron_rate.times.value[i+int(average_length/2)]) 
-        i += 1                                                                          
+        time = omicron_rate.times.value[i+int(average_length/2)]                                                                 
 
-    omicron_MA = TimeSeries(moving_averages, times=moving_averages_times)   
+    omicron_MA = TimeSeries(moving_averages, times=moving_averages_times)
     return omicron_MA
 
 """
@@ -97,61 +103,53 @@ events = EventTable.read(cache,tablename='sngl_burst', columns=['peak', 'snr'])
 keep = in_segmentlist(events.get_column('peak'), l1segs.active)
 filtered_events = events[keep]
 
-filtered_events_5  = filtered_events.filter('snr >= 5')
-filtered_events_8  = filtered_events.filter('snr >= 8')
-filtered_events_10 = filtered_events.filter('snr >= 10')
-filtered_events_20 = filtered_events.filter('snr >= 20')
+for snr in snr_list:
+    omicron_MA_dict[snr]['filtered_events'] = filtered_events.filter(f'snr >= {snr}')
 
 new_seg_list = check_segs(l1segs.active, STRIDE, AVERAGE_LEN)
 
+# do averaging
 for segment in new_seg_list:
-    moving_avg_5 = moving_average(filtered_events_5, STRIDE, AVERAGE_LEN, int(segment[0]), int(segment[1]))
-    for i in moving_avg_5.value:
-        mean_list5.append(i)
-    omicron_MA_5.append(moving_avg_5, pad=0)
-   
-    moving_avg_8 = moving_average(filtered_events_8, STRIDE, AVERAGE_LEN, int(segment[0]), int(segment[1]))
-    for i in moving_avg_8.value:
-        mean_list8.append(i)
-    omicron_MA_8.append(moving_avg_8, pad=0)
+    for snr in snr_list:
+        moving_avg = moving_average(omicron_MA_dict[snr]['filtered_events'], STRIDE, AVERAGE_LEN, int(segment[0]), int(segment[1]))
+        for i in moving_avg.value:
+            omicron_MA_dict[snr]['mean_list'].append(i)
+        omicron_MA_dict[snr]['ts'].append(moving_avg, pad=0)
+
+# check if output folder exists
+if not os.path.exists(out_folder):
+    os.makedirs(out_folder)
+
+# save timeseries
+for snr in snr_list:
+    out_path = os.path.join(out_folder, '{}.gwf'.format(omicron_MA_dict[snr]['ts'].name))
+    omicron_MA_dict[snr]['ts'].write(out_path, format='gwf')
+
+# get standard deviation and mean
+for snr in snr_list:
+    omicron_MA_dict[snr]['std'] = np.std(omicron_MA_dict[snr]['mean_list'])
+    omicron_MA_dict[snr]['mean'] = np.mean(omicron_MA_dict[snr]['mean_list'])
+
+# plotting
+c_map = cm.get_cmap('magma', len(snr_list))
     
-    moving_avg_10 = moving_average(filtered_events_10, STRIDE, AVERAGE_LEN, int(segment[0]), int(segment[1]))
-    for i in moving_avg_10.value:
-        mean_list10.append(i)
-    omicron_MA_10.append(moving_avg_10, pad=0)
-
-    moving_avg_20 = moving_average(filtered_events_20, STRIDE, AVERAGE_LEN, int(segment[0]), int(segment[1]))
-    for i in moving_avg_20.value:
-        mean_list20.append(i)
-    omicron_MA_20.append(moving_avg_20, pad=0)
-
-std5 = np.std(mean_list5)
-std8 = np.std(mean_list8)
-std10 = np.std(mean_list10)
-std20 = np.std(mean_list20)
-mean5 = np.mean(mean_list5)
-mean8 = np.mean(mean_list8)
-mean10 = np.mean(mean_list10)
-mean20 = np.mean(mean_list20)
-
-plot1 = Plot(omicron_MA_5, omicron_MA_8,omicron_MA_10, omicron_MA_20, figsize=(20, 7))
+plot1 = Plot(figsize=(20, 7))
 ax1 = plot1.gca()
+for index, snr in enumerate(snr_list):
+    ax1.plot(omicron_MA_dict[snr]['ts'], label=omicron_MA_dict[snr]['ts'].name, color=c_map.colors[index])
 ax1.set_yscale('log')
 ax1.set_ylabel('Glitch rate MA[Hz]')
 ax1.set_xlim(start,end)
+ax1.legend()
 
-plot2 = Plot(omicron_MA_5,omicron_MA_8,omicron_MA_10, omicron_MA_20,figsize=(20, 7), label='Omicron Moving Average')
+plot2 = Plot(figsize=(20, 7))
 ax2 = plot2.gca()
-ax2.axhline(mean5-std5, color='red', linestyle='--', label = 'Mean5-STD')
-ax2.axhline(mean5+std5, color='red', linestyle='--', label = 'Mean5+STD')
-ax2.axhline(mean8-std8, color='green', linestyle='--', label = 'Mean8-STD')
-ax2.axhline(mean8+std8, color='green', linestyle='--', label = 'Mean8+STD')
-ax2.axhline(mean10-std10, color='pink', linestyle='--', label = 'Mean10-STD')
-ax2.axhline(mean10+std10, color='pink', linestyle='--', label = 'Mean10+STD')
-ax2.axhline(mean20-std20, color='cyan', linestyle='--', label = 'Mean20-STD')
-ax2.axhline(mean20+std20, color='cyan', linestyle='--', label = 'Mean20+STD')
+for index, snr in enumerate(snr_list):
+    ax2.plot(omicron_MA_dict[snr]['ts'], label=omicron_MA_dict[snr]['ts'].name, color=c_map.colors[index])
+    ax2.axhline(omicron_MA_dict[snr]['mean']-omicron_MA_dict[snr]['std'], linestyle='--', label=f'Mean{snr}-STD', color=c_map.colors[index])
+    ax2.axhline(omicron_MA_dict[snr]['mean']+omicron_MA_dict[snr]['std'], linestyle='--', label=f'Mean{snr}+STD', color=c_map.colors[index])
 ax2.set_xlim(start,end)
 ax2.legend()
 
-plot1.save(file_location1)
-plot2.save(file_location2)
+plot1.save(os.path.join(out_folder, 'plot_1.jpg'))
+plot2.save(os.path.join(out_folder, 'plot_2.jpg'))
